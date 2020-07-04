@@ -1,0 +1,25 @@
+# Elm build artifacts
+elm-stuff/
+node_modules/
+
+# Build outputs
+/web/app.js
+/bin/
+
+# C build artifacts
+*.o
+*.so
+*.dylib
+*.a
+/c_fastpath/c_test_runner
+
+# Python artifacts
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+
+# System files
+.DS_Store
+*.swp
+*~

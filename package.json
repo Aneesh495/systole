@@ -1,0 +1,18 @@
+{
+  "name": "systole",
+  "version": "1.0.0",
+  "description": "Deterministic life-critical ICU physiological telemetry, multimodal hemodynamic monitoring, and clinical decision support workstation in pure Elm",
+  "author": "Aneesh Krishna",
+  "license": "MIT",
+  "scripts": {
+    "build": "elm make src/Main.elm --optimize --output=web/app.js",
+    "test": "elm-test",
+    "format": "elm-format src/ tests/ --yes",
+    "verify": "bash scripts/verify_no_em_dashes.sh"
+  },
+  "devDependencies": {
+    "elm": "^0.19.3-0",
+    "elm-format": "^0.8.8",
+    "elm-test": "^0.19.3-0"
+  }
+}
