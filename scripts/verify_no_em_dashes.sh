@@ -11,7 +11,7 @@ echo "Scanning repository for prohibited em dashes..."
 
 PROHIBITED_FOUND=0
 
-# Search for Unicode em dash (U+2014)
+# Search for Unicode em dash (U+2014) across all tracked files
 EM_DASH_HITS=$(git grep -I -n $'\u2014' || true)
 
 if [ -n "$EM_DASH_HITS" ]; then
@@ -20,12 +20,12 @@ if [ -n "$EM_DASH_HITS" ]; then
     PROHIBITED_FOUND=1
 fi
 
-# Search for double-hyphen used as em dash with surrounding spaces
-DOUBLE_DASH_HITS=$(git grep -I -E ' -- ' || true)
+# Search for double-hyphen used as em dash in prose, excluding scripts directory
+PROSE_DASH_HITS=$(git grep -I -n -E '[a-zA-Z0-9]--[a-zA-Z0-9]| -- ' -- ':!scripts/*' || true)
 
-if [ -n "$DOUBLE_DASH_HITS" ]; then
-    echo "ERROR: Found double-hyphen with spaces used as em dash:"
-    echo "$DOUBLE_DASH_HITS"
+if [ -n "$PROSE_DASH_HITS" ]; then
+    echo "ERROR: Found double-hyphen used as em dash in prose:"
+    echo "$PROSE_DASH_HITS"
     PROHIBITED_FOUND=1
 fi
 
@@ -33,6 +33,6 @@ if [ "$PROHIBITED_FOUND" -eq 1 ]; then
     echo "Verification failed: em dashes are prohibited."
     exit 1
 else
-    echo "Verification passed: zero em dashes found across all tracked files."
+    echo "Verification passed: zero em dashes found across all scanned files."
     exit 0
 fi
