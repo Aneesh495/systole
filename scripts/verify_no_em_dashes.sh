@@ -20,8 +20,9 @@ if [ -n "$EM_DASH_HITS" ]; then
     PROHIBITED_FOUND=1
 fi
 
-# Search for double-hyphen used as em dash in prose, excluding scripts directory
-PROSE_DASH_HITS=$(git grep -I -n -E '[a-zA-Z0-9]--[a-zA-Z0-9]| -- ' -- ':!scripts/*' || true)
+# Search for double-hyphen used as em dash in prose between words: "word -- word" or "word--word"
+# This correctly ignores Elm comment leader syntax like "-- comment"
+PROSE_DASH_HITS=$(git grep -I -n -E '[a-zA-Z0-9]+[[:space:]]+--[[:space:]]+[a-zA-Z0-9]+|[a-zA-Z0-9]+--[a-zA-Z0-9]+' -- ':!scripts/*' || true)
 
 if [ -n "$PROSE_DASH_HITS" ]; then
     echo "ERROR: Found double-hyphen used as em dash in prose:"
