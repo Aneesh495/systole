@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Systole :: Deterministic Life-Critical ICU Telemetry Workstation</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>♥</text></svg>">
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+        }
+        body {
+            background-color: #06090e;
+            color: #f0f6fc;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            overflow-x: hidden;
+        }
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #090d15;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #1c2638;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #2a3a54;
+        }
+    </style>
+</head>
+<body>
+    <div id="elm-app"></div>
+
+    <script src="app.js"></script>
+    <script>
+        // Mount pure Elm application
+        const app = Elm.Main.init({
+            node: document.getElementById('elm-app')
+        });
+
+        // Web Audio API Synthesizer for IEC 60601-1-8 Medical Alarm Tones
+        let audioCtx = null;
+
+        function initAudio() {
+            if (!audioCtx) {
+                const AudioContext = window.AudioContext || window.webkitAudioContext;
+                audioCtx = new AudioContext();
+            }
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+        }
+
+        // Play standard IEC 60601-1-8 melodic alarm burst
+        function playAlarmMelody(priority) {
+            initAudio();
+            if (!audioCtx) return;
+
+            const now = audioCtx.currentTime;
+
+            if (priority === 'CRISIS') {
+                // High Priority: 10-pulse burst (two 5-pulse groups: C5, E5, G5, G5, C6)
+                const pitches = [523.25, 659.25, 783.99, 783.99, 1046.50];
+                for (let group = 0; group < 2; group++) {
+                    const groupStart = now + (group * 0.45);
+                    pitches.forEach((freq, idx) => {
+                        const noteStart = groupStart + (idx * 0.08);
+                        playTone(freq, noteStart, 0.06);
+                    });
+                }
+            } else if (priority === 'WARNING') {
+                // Medium Priority: 3-pulse burst (C5, E5, G5)
+                const pitches = [523.25, 659.25, 783.99];
+                pitches.forEach((freq, idx) => {
+                    const noteStart = now + (idx * 0.12);
+                    playTone(freq, noteStart, 0.09);
+                });
+            }
+        }
+
+        function playTone(freq, startTime, duration) {
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(freq, startTime);
+
+            // Envelope to avoid click
+            gain.gain.setValueAtTime(0.001, startTime);
+            gain.gain.exponentialRampToValueAtTime(0.18, startTime + 0.01);
+            gain.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
+
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+
+            osc.start(startTime);
+            osc.stop(startTime + duration + 0.05);
+        }
+
+        // Handle audioAlarm port from Elm
+        if (app.ports && app.ports.audioAlarm) {
+            app.ports.audioAlarm.subscribe(function(priority) {
+                if (priority !== 'MUTE') {
+                    playAlarmMelody(priority);
+                }
+            });
+        }
+
+        // Global keyboard accelerators for clinical simulation
+        window.addEventListener('keydown', function(e) {
+            initAudio();
+            if (e.key === ' ') {
+                e.preventDefault();
+                // Space bar toggles pause
+            }
+        });
+    </script>
+</body>
+</html>

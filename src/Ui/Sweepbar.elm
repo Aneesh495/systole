@@ -1,5 +1,6 @@
 module Ui.Sweepbar exposing
     ( SweepbarChannel
+    , normalizeX
     , renderSweepbarChannel
     , renderWaveformPath
     )
