@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# Systole Command-Line Operational Interface.
+# Orchestrates test suites, telemetry streaming, build pipelines, and compliance verification.
+
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+
+usage() {
+    echo "Usage: systolectl <command>"
+    echo ""
+    echo "Commands:"
+    echo "  test       Run Elm unit tests, C fastpath harness, and Python suite"
+    echo "  build      Build optimized Elm web bundle and C fastpath binary"
+    echo "  stream     Stream real-time IEEE 11073 telemetry via Python bridge"
+    echo "  verify     Verify zero prohibited em dashes across all tracked files"
+    echo "  help       Display this help message"
+    exit 1
+}
+
+if [ $# -eq 0 ]; then
+    usage
+fi
+
+COMMAND="$1"
+shift
+
+case "$COMMAND" in
+    test)
+        echo "=== Running Elm Unit Test Suite ==="
+        elm-test
+        echo ""
+        echo "=== Running C Fastpath Numerical Equivalence Suite ==="
+        $(MAKE) -C c_fastpath test
+        echo ""
+        echo "=== Running Python Integration Suite ==="
+        python3 -m unittest discover -s tools -p "test_*.py" -v
+        echo ""
+        echo "=== Verifying Zero Prohibited Em Dashes ==="
+        bash scripts/verify_no_em_dashes.sh
+        echo ""
+        echo "ALL TEST SUITES PASSED SUCCESSFULLY."
+        ;;
+    build)
+        echo "Building optimized Elm application..."
+        mkdir -p web
+        elm make src/Main.elm --optimize --output=web/app.js
+        echo "Building C fastpath test runner..."
+        $(MAKE) -C c_fastpath all
+        echo "Build completed."
+        ;;
+    stream)
+        python3 tools/systole_bridge.py "$@"
+        ;;
+    verify)
+        bash scripts/verify_no_em_dashes.sh
+        ;;
+    help|--help|-h)
+        usage
+        ;;
+    *)
+        echo "Unknown command: $COMMAND"
+        usage
+        ;;
+esac
