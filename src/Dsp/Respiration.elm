@@ -29,7 +29,8 @@ type BreathPhase
 -}
 type ApneaStatus
     = BreathingNormal
-    | ApneaWarning Float -- duration in seconds without a breath
+    -- Duration in seconds without a breath
+    | ApneaWarning Float
     | ApneaCrisis Float
 
 
@@ -74,13 +75,16 @@ initRespirationState sampleRate =
     { sampleRate = sampleRate
     , bandpassCoeffs = bpCoeffs
     , bandpassState = Filter.initBiquadState
-    , baselineZ0 = 500.0 -- typical resting thoracic impedance ~ 500 Ohms
+    -- Resting thoracic baseline impedance ~ 500 Ohms
+    , baselineZ0 = 500.0
     , lastSample = 0.0
     , currentPhase = PausePhase
-    , breathIntervalsSec = [ 4.0, 4.0, 4.0 ] -- default 15 bpm (60 / 4)
+    -- Default 15 bpm (60 / 4)
+    , breathIntervalsSec = [ 4.0, 4.0, 4.0 ]
     , timeSinceLastBreathSec = 0.0
     , breathCount = 0
-    , estimatedTidalVolume = 500.0 -- typical resting tidal volume 500 mL
+    -- Resting tidal volume 500 mL
+    , estimatedTidalVolume = 500.0
     }
 
 
