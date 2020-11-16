@@ -2,6 +2,7 @@ module Protocol.Hl7Fhir exposing
     ( FhirObservation
     , buildObservation
     , encodeFhirObservation
+    , exportPatientBundleJson
     , loincDiastolicBp
     , loincEndTidalCo2
     , loincHeartRate
@@ -16,6 +17,7 @@ Names and Codes (LOINC) and Unified Code for Units of Measure (UCUM) codings.
 
 import Dsp.Types exposing (Timestamp)
 import Json.Encode as Encode
+import Simulation.Patient as Patient
 
 
 {-| Standard clinical LOINC identifiers.
@@ -105,3 +107,44 @@ encodeFhirObservation obs =
           )
         , ( "effectiveDateTime", Encode.string (String.fromFloat obs.effectiveTimestamp ++ "ms") )
         ]
+
+
+{-| Export all patient vitals as a FHIR R4 Bundle JSON string.
+-}
+exportPatientBundleJson : Patient.PatientProfile -> Timestamp -> String
+exportPatientBundleJson patient ts =
+    let
+        obsHr =
+            buildObservation (patient.id ++ "-hr") loincHeartRate "Heart Rate" patient.baselineHeartRateBpm "beats/min" "/min" ts
+
+        obsSys =
+            buildObservation (patient.id ++ "-sys") loincSystolicBp "Systolic Blood Pressure" patient.baselineSystolicMmhg "mmHg" "mm[Hg]" ts
+
+        obsDia =
+            buildObservation (patient.id ++ "-dia") loincDiastolicBp "Diastolic Blood Pressure" patient.baselineDiastolicMmhg "mmHg" "mm[Hg]" ts
+
+        obsSpo2 =
+            buildObservation (patient.id ++ "-spo2") loincOxygenSaturation "Oxygen Saturation" patient.baselineSpo2Percent "%" "%" ts
+
+        obsEtco2 =
+            buildObservation (patient.id ++ "-etco2") loincEndTidalCo2 "End-Tidal Carbon Dioxide" patient.baselineEtco2Mmhg "mmHg" "mm[Hg]" ts
+
+        entries =
+            [ obsHr, obsSys, obsDia, obsSpo2, obsEtco2 ]
+                |> List.map
+                    (\obs ->
+                        Encode.object
+                            [ ( "fullUrl", Encode.string ("urn:uuid:" ++ obs.id) )
+                            , ( "resource", encodeFhirObservation obs )
+                            ]
+                    )
+
+        bundle =
+            Encode.object
+                [ ( "resourceType", Encode.string "Bundle" )
+                , ( "id", Encode.string ("bundle-" ++ patient.id) )
+                , ( "type", Encode.string "transaction" )
+                , ( "entry", Encode.list identity entries )
+                ]
+    in
+    Encode.encode 2 bundle
