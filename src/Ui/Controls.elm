@@ -1,5 +1,6 @@
 module Ui.Controls exposing
-    ( renderControlToolbar
+    ( ToolbarActions
+    , renderControlToolbar
     )
 
 {-| Simulation controls, emergency contingency triggers, and navigation toolbar.
@@ -14,6 +15,27 @@ import Simulation.Scenarios as Scenarios exposing (ClinicalScenario(..))
 import Ui.Theme as Theme
 
 
+{-| Action record for toolbar button events.
+-}
+type alias ToolbarActions msg =
+    { togglePause : msg
+    , setSpeed : Float -> msg
+    , selectScenario : ClinicalScenario -> msg
+    , open12Lead : msg
+    , openHemo : msg
+    , openPump : msg
+    , openPvLoop : msg
+    , openVentilator : msg
+    , openTrends : msg
+    , openSpectrum : msg
+    , openEhr : msg
+    , toggleWard : msg
+    , triggerVfib : msg
+    , triggerAsystole : msg
+    , resetNominal : msg
+    }
+
+
 {-| Render the clinical control toolbar.
 -}
 renderControlToolbar :
@@ -21,36 +43,27 @@ renderControlToolbar :
     -> Float
     -> ClinicalScenario
     -> Bool
-    -> msg
-    -> (Float -> msg)
-    -> (ClinicalScenario -> msg)
-    -> msg
-    -> msg
-    -> msg
-    -> msg
-    -> msg
-    -> msg
-    -> msg
+    -> ToolbarActions msg
     -> Html msg
-renderControlToolbar isPaused simSpeed currentScenario isWardView togglePauseMsg setSpeedMsg selectScenarioMsg open12LeadMsg openHemoMsg openPumpMsg toggleWardMsg triggerVfibMsg triggerAsystoleMsg resetNominalMsg =
+renderControlToolbar isPaused simSpeed currentScenario isWardView actions =
     div
         [ style "background" "#090d15"
         , style "border-top" "1px solid #141c2b"
-        , style "padding" "10px 20px"
+        , style "padding" "10px 16px"
         , style "display" "flex"
         , style "justify-content" "space-between"
         , style "align-items" "center"
         , style "flex-wrap" "wrap"
-        , style "gap" "12px"
+        , style "gap" "10px"
         ]
         [ -- Left group: Playback, Speed, Scenario
           div
             [ style "display" "flex"
             , style "align-items" "center"
-            , style "gap" "10px"
+            , style "gap" "8px"
             ]
             [ button
-                [ onClick togglePauseMsg
+                [ onClick actions.togglePause
                 , style "background"
                     (if isPaused then
                         Theme.warningColor
@@ -67,10 +80,10 @@ renderControlToolbar isPaused simSpeed currentScenario isWardView togglePauseMsg
                     )
                 , style "border" "1px solid #2a3a54"
                 , style "border-radius" "4px"
-                , style "padding" "6px 14px"
+                , style "padding" "6px 12px"
                 , style "font-family" "monospace"
                 , style "font-weight" "bold"
-                , style "font-size" "12px"
+                , style "font-size" "11px"
                 , style "cursor" "pointer"
                 ]
                 [ text
@@ -85,38 +98,44 @@ renderControlToolbar isPaused simSpeed currentScenario isWardView togglePauseMsg
                 [ style "display" "flex"
                 , style "gap" "4px"
                 ]
-                [ speedButton "1x" (simSpeed == 1.0) (setSpeedMsg 1.0)
-                , speedButton "2x" (simSpeed == 2.0) (setSpeedMsg 2.0)
-                , speedButton "5x" (simSpeed == 5.0) (setSpeedMsg 5.0)
+                [ speedButton "1x" (simSpeed == 1.0) (actions.setSpeed 1.0)
+                , speedButton "2x" (simSpeed == 2.0) (actions.setSpeed 2.0)
+                , speedButton "5x" (simSpeed == 5.0) (actions.setSpeed 5.0)
                 ]
             , select
                 [ onInput
                     (\s ->
-                        selectScenarioMsg (stringToScenario s)
+                        actions.selectScenario (stringToScenario s)
                     )
                 , style "background" "#101826"
                 , style "color" Theme.textPrimaryColor
                 , style "border" "1px solid #233047"
                 , style "border-radius" "4px"
-                , style "padding" "6px 10px"
+                , style "padding" "6px 8px"
                 , style "font-family" "monospace"
-                , style "font-size" "12px"
+                , style "font-size" "11px"
                 , style "cursor" "pointer"
                 ]
                 (List.map (\scen -> renderScenarioOption scen (scen == currentScenario)) Scenarios.allScenarios)
             ]
 
-        -- Center group: Diagnostic Modals and Views
+        -- Center group: Diagnostic Modals and Workstations
         , div
             [ style "display" "flex"
             , style "align-items" "center"
-            , style "gap" "8px"
+            , style "gap" "6px"
+            , style "flex-wrap" "wrap"
             ]
-            [ navButton "12-LEAD ECG" open12LeadMsg
-            , navButton "HEMODYNAMICS" openHemoMsg
-            , navButton "INFUSION PUMP" openPumpMsg
+            [ navButton "12-LEAD" actions.open12Lead
+            , navButton "HEMO" actions.openHemo
+            , navButton "PV LOOP" actions.openPvLoop
+            , navButton "VENTILATOR" actions.openVentilator
+            , navButton "TRENDS" actions.openTrends
+            , navButton "SPECTRUM" actions.openSpectrum
+            , navButton "PUMP" actions.openPump
+            , navButton "EHR" actions.openEhr
             , button
-                [ onClick toggleWardMsg
+                [ onClick actions.toggleWard
                 , style "background"
                     (if isWardView then
                         Theme.ppgColor
@@ -133,18 +152,18 @@ renderControlToolbar isPaused simSpeed currentScenario isWardView togglePauseMsg
                     )
                 , style "border" "1px solid #2a3a54"
                 , style "border-radius" "4px"
-                , style "padding" "6px 14px"
+                , style "padding" "6px 12px"
                 , style "font-family" "monospace"
                 , style "font-weight" "bold"
-                , style "font-size" "12px"
+                , style "font-size" "11px"
                 , style "cursor" "pointer"
                 ]
                 [ text
                     (if isWardView then
-                        "BEDSIDE MONITOR"
+                        "BEDSIDE"
 
                      else
-                        "WARD OVERVIEW"
+                        "WARD"
                     )
                 ]
             ]
@@ -153,101 +172,101 @@ renderControlToolbar isPaused simSpeed currentScenario isWardView togglePauseMsg
         , div
             [ style "display" "flex"
             , style "align-items" "center"
-            , style "gap" "8px"
+            , style "gap" "6px"
             ]
-            [ emergencyButton "INJECT V-FIB" triggerVfibMsg
-            , emergencyButton "INJECT ASYSTOLE" triggerAsystoleMsg
+            [ emergencyButton "INJECT V-FIB" actions.triggerVfib
+            , emergencyButton "INJECT ASYSTOLE" actions.triggerAsystole
             , button
-                [ onClick resetNominalMsg
-                , style "background" "#101826"
+                [ onClick actions.resetNominal
+                , style "background" "#182234"
                 , style "color" Theme.ecgColor
-                , style "border" ("1px solid " ++ Theme.ecgColor)
+                , style "border" "1px solid #2a3a54"
                 , style "border-radius" "4px"
-                , style "padding" "6px 12px"
+                , style "padding" "6px 10px"
                 , style "font-family" "monospace"
                 , style "font-weight" "bold"
                 , style "font-size" "11px"
                 , style "cursor" "pointer"
                 ]
-                [ text "RESET NOMINAL" ]
+                [ text "RESET" ]
             ]
         ]
 
 
 speedButton : String -> Bool -> msg -> Html msg
-speedButton labelText isSelected clickMsg =
+speedButton label isActive msg =
     button
-        [ onClick clickMsg
+        [ onClick msg
         , style "background"
-            (if isSelected then
-                Theme.ppgColor
+            (if isActive then
+                "#2b3c5a"
 
              else
                 "#101826"
             )
         , style "color"
-            (if isSelected then
-                "#000000"
+            (if isActive then
+                Theme.ppgColor
 
              else
                 Theme.textMutedColor
             )
-        , style "border" "1px solid #1c2638"
+        , style "border" "1px solid #1e2c44"
         , style "border-radius" "3px"
         , style "padding" "4px 8px"
         , style "font-family" "monospace"
-        , style "font-weight" "bold"
         , style "font-size" "11px"
+        , style "font-weight" "bold"
         , style "cursor" "pointer"
         ]
-        [ text labelText ]
+        [ text label ]
 
 
 navButton : String -> msg -> Html msg
-navButton labelText clickMsg =
+navButton label msg =
     button
-        [ onClick clickMsg
-        , style "background" "#182234"
+        [ onClick msg
+        , style "background" "#141d2e"
         , style "color" Theme.textPrimaryColor
-        , style "border" "1px solid #2a3a54"
+        , style "border" "1px solid #263857"
         , style "border-radius" "4px"
-        , style "padding" "6px 14px"
+        , style "padding" "6px 10px"
         , style "font-family" "monospace"
+        , style "font-size" "11px"
         , style "font-weight" "bold"
-        , style "font-size" "12px"
         , style "cursor" "pointer"
         ]
-        [ text labelText ]
+        [ text label ]
 
 
 emergencyButton : String -> msg -> Html msg
-emergencyButton labelText clickMsg =
+emergencyButton label msg =
     button
-        [ onClick clickMsg
-        , style "background" "rgba(255, 0, 51, 0.15)"
+        [ onClick msg
+        , style "background" "#2b0a12"
         , style "color" Theme.alertColor
-        , style "border" ("1px solid " ++ Theme.alertColor)
+        , style "border" "1px solid #5a1424"
         , style "border-radius" "4px"
-        , style "padding" "6px 12px"
+        , style "padding" "6px 10px"
         , style "font-family" "monospace"
         , style "font-weight" "bold"
         , style "font-size" "11px"
         , style "cursor" "pointer"
         ]
-        [ text labelText ]
+        [ text label ]
 
 
 renderScenarioOption : ClinicalScenario -> Bool -> Html msg
-renderScenarioOption scen isSelected =
+renderScenarioOption scen isSel =
     option
-        [ value (scenarioToKey scen)
-        , selected isSelected
+        [ value (scenarioToString scen)
+        , selected isSel
         ]
-        [ text (Scenarios.scenarioToString scen) ]
+        [ text (scenarioToLabel scen) ]
 
 
-scenarioToKey : ClinicalScenario -> String
-scenarioToKey scen =
+scenarioToString : ClinicalScenario -> String
+scenarioToString scen =
     case scen of
         BaselineNominal ->
             "nominal"
@@ -259,7 +278,7 @@ scenarioToKey scen =
             "sepsis"
 
         TensionPneumothorax ->
-            "pneumothorax"
+            "pneumo"
 
         HypovolemicHemorrhage ->
             "hemorrhage"
@@ -268,19 +287,19 @@ scenarioToKey scen =
             "opioid"
 
         MalignantHyperthermiaCrisis ->
-            "malignant_hyperthermia"
+            "hyperthermia"
 
 
 stringToScenario : String -> ClinicalScenario
-stringToScenario str =
-    case str of
+stringToScenario s =
+    case s of
         "stemi" ->
             AcuteAnteriorStemi
 
         "sepsis" ->
             SepticShockDistributive
 
-        "pneumothorax" ->
+        "pneumo" ->
             TensionPneumothorax
 
         "hemorrhage" ->
@@ -289,8 +308,33 @@ stringToScenario str =
         "opioid" ->
             OpioidRespiratoryDepression
 
-        "malignant_hyperthermia" ->
+        "hyperthermia" ->
             MalignantHyperthermiaCrisis
 
         _ ->
             BaselineNominal
+
+
+scenarioToLabel : ClinicalScenario -> String
+scenarioToLabel scen =
+    case scen of
+        BaselineNominal ->
+            "Nominal Resting State"
+
+        AcuteAnteriorStemi ->
+            "Acute Anterior STEMI"
+
+        SepticShockDistributive ->
+            "Septic Shock (Hyperdynamic)"
+
+        TensionPneumothorax ->
+            "Tension Pneumothorax"
+
+        HypovolemicHemorrhage ->
+            "Severe Hemorrhagic Shock"
+
+        OpioidRespiratoryDepression ->
+            "Opioid Hypoventilation"
+
+        MalignantHyperthermiaCrisis ->
+            "Malignant Hyperthermia"

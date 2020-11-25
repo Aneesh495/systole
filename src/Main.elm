@@ -7,23 +7,30 @@ Built from first principles in pure Elm with zero runtime exceptions.
 
 import Alarms.EarlyWarning as EW
 import Alarms.Manager as AM
+import Alarms.SmartFusion as SmartFusion exposing (SensorSqi)
 import Alarms.Types as AT exposing (AlarmPriority(..))
 import Browser
 import Browser.Events
 import Dsp.Arrhythmia as Arr exposing (ArrhythmiaType(..))
+import Dsp.BiquadCascade as Cascade exposing (CascadeFilter)
 import Dsp.Capnography as Capno
 import Dsp.EcgAnalysis as EcgAnalysis exposing (EcgMetrics)
 import Dsp.PanTompkins as PT
 import Dsp.Plethysmograph as Pleth
 import Dsp.PulseContour as PulseContour
+import Dsp.Respiration as Resp exposing (RespirationState)
+import Dsp.Spectrum as Spectrum exposing (HrvFrequencyMetrics)
 import Dsp.Types exposing (Lead(..), WaveformPoint, allLeads)
+import Dsp.Wavelet as Wavelet
 import Hemodynamics.Calculations as Hemo exposing (HemodynamicProfile, OxygenTransport)
+import Hemodynamics.PressureVolumeLoop as Pv exposing (PvLoopModel)
 import Hemodynamics.Targets as Targets
 import Html exposing (Html, div, span, text)
 import Html.Attributes exposing (style)
 import Json.Decode as Decode
 import Json.Encode as Encode
 import Pharmacokinetics.Compartment as PK exposing (CompartmentConcentrations)
+import Pharmacokinetics.Eleveld as Eleveld
 import Pharmacokinetics.Models as Models exposing (DrugType(..))
 import Pharmacokinetics.Pharmacodynamics as PD
 import Pharmacokinetics.Titration as TCI
@@ -31,16 +38,22 @@ import Ports
 import Simulation.Patient exposing (PatientProfile, defaultPatient)
 import Simulation.Scenarios as Scenarios exposing (ClinicalScenario(..))
 import Simulation.SignalGenerator as SigGen exposing (GeneratedSamples)
+import Simulation.Ventilator as Vent exposing (VentilatorMechanics, VentilatorScalars, VentilatorSettings, VentilatorState)
 import Simulation.Ward as Ward exposing (WardState)
 import Time
 import Ui.AlarmBanner as AlarmBanner
-import Ui.Controls as Controls
+import Ui.Controls as Controls exposing (ToolbarActions)
+import Ui.EhrExportModal as EhrModal exposing (ExportFormat(..))
 import Ui.HemodynamicsModal as HemoModal
 import Ui.InfusionPumpModal as PumpModal exposing (InfusionPumpState)
 import Ui.LeadModal as LeadModal exposing (LeadSnippet)
 import Ui.NumericBlock as NumericBlock
+import Ui.PvLoopModal as PvModal
+import Ui.SpectrumModal as SpectrumModal
 import Ui.Sweepbar as Sweepbar exposing (SweepbarChannel)
 import Ui.Theme as Theme
+import Ui.TrendsView as TrendsView exposing (TrendInterval(..), TrendRecord)
+import Ui.VentilatorView as VentView
 import Ui.WardOverview as WardOverview
 
 
@@ -51,6 +64,11 @@ type ActiveModal
     | Modal12Lead
     | ModalHemodynamics
     | ModalInfusionPump
+    | ModalPvLoop
+    | ModalVentilator
+    | ModalTrends
+    | ModalSpectrum
+    | ModalEhrExport
 
 
 {-| The central Elm Architecture application state.
@@ -73,12 +91,35 @@ type alias Model =
     , plethState : Pleth.PlethState
     , capnoState : Capno.CapnoState
     , generatorState : SigGen.GeneratorState
+    , respirationState : Resp.RespirationState
+    , sensorSqi : SensorSqi
+
+    -- Mechanical Ventilator State
+    , ventSettings : Vent.VentilatorSettings
+    , ventMechanics : Vent.VentilatorMechanics
+    , ventState : Vent.VentilatorState
+    , ventScalars : Vent.VentilatorScalars
+    , pawHistory : List Float
+    , flowHistory : List Float
+    , volHistory : List Float
+
+    -- Pressure Volume Loop Model
+    , pvModel : Pv.PvLoopModel
+
+    -- Retrospective Trends and Spectral Analysis
+    , trendRecords : List TrendRecord
+    , trendInterval : TrendInterval
+    , lastTrendRecordTimeMs : Float
+    , hrvMetrics : HrvFrequencyMetrics
+    , psdPoints : List ( Float, Float )
+    , rrHistoryMs : List Float
 
     -- Telemetry Metrics
     , ecgMetrics : EcgMetrics
     , hemoProfile : HemodynamicProfile
     , oxygenTransport : OxygenTransport
     , alarmManager : AM.AlarmManager
+    , ehrFormat : ExportFormat
 
     -- Pharmacokinetics and Infusion Pump
     , pumpState : InfusionPumpState
@@ -115,6 +156,11 @@ type Msg
     | TriggerEmergencyAsystole
     | ResetNominal
     | InboundTelemetry Encode.Value
+    | PvModalMsg PvModal.Msg
+    | VentViewMsg VentView.Msg
+    | TrendsViewMsg TrendsView.Msg
+    | SpectrumModalMsg SpectrumModal.Msg
+    | EhrModalMsg EhrModal.Msg
 
 
 {-| Initialize application model.
@@ -160,6 +206,34 @@ init _ =
 
         initialSnippets =
             List.map (\lead -> { lead = lead, points = [] }) allLeads
+
+        initVent =
+            Vent.initVentilatorState 200.0
+
+        ( initialVentScalars, _ ) =
+            Vent.stepVentilator Vent.defaultSettings Vent.defaultMechanics initVent
+
+        defaultHrv =
+            { vlfPowerMs2 = 250.0
+            , lfPowerMs2 = 600.0
+            , hfPowerMs2 = 450.0
+            , totalPowerMs2 = 1300.0
+            , lfHfRatio = 1.33
+            , lfNormalized = 57.1
+            , hfNormalized = 42.9
+            }
+
+        initialTrend =
+            { timestampSec = 0.0
+            , heartRateBpm = 75.0
+            , abpSystolicMmHg = 120.0
+            , abpDiastolicMmHg = 80.0
+            , abpMeanMmHg = 93.3
+            , spO2Percent = 98.0
+            , etco2MmHg = 38.0
+            , respiratoryRateBpm = 14.0
+            , temperatureCelsius = 37.0
+            }
     in
     ( { currentTimeMs = 0.0
       , isPaused = False
@@ -176,6 +250,22 @@ init _ =
       , plethState = Pleth.emptyPlethState
       , capnoState = Capno.emptyCapnoState
       , generatorState = genSt
+      , respirationState = Resp.initRespirationState 200.0
+      , sensorSqi = SmartFusion.defaultSqi
+      , ventSettings = Vent.defaultSettings
+      , ventMechanics = Vent.defaultMechanics
+      , ventState = initVent
+      , ventScalars = initialVentScalars
+      , pawHistory = List.repeat 60 8.0
+      , flowHistory = List.repeat 60 0.0
+      , volHistory = List.repeat 60 0.0
+      , pvModel = Pv.defaultPvModel
+      , trendRecords = [ initialTrend ]
+      , trendInterval = Interval1Hour
+      , lastTrendRecordTimeMs = 0.0
+      , hrvMetrics = defaultHrv
+      , psdPoints = [ ( 0.05, 50.0 ), ( 0.1, 120.0 ), ( 0.25, 80.0 ) ]
+      , rrHistoryMs = [ 800.0, 810.0, 795.0, 805.0, 800.0 ]
       , ecgMetrics = EcgAnalysis.emptyMetrics
       , hemoProfile = Hemo.defaultProfile
       , oxygenTransport =
@@ -188,6 +278,7 @@ init _ =
                 5.2
                 patient.bsaM2
       , alarmManager = AM.emptyAlarmManager
+      , ehrFormat = FhirJsonFormat
       , pumpState = initialPump
       , pkCompartmentState = pkSt
       , leadIiPoints = []
@@ -201,44 +292,34 @@ init _ =
     )
 
 
-{-| Subscriptions: frame tick via requestAnimationFrame and inbound telemetry port.
--}
-subscriptions : Model -> Sub Msg
-subscriptions model =
-    if model.isPaused then
-        Ports.streamIn InboundTelemetry
-
-    else
-        Sub.batch
-            [ Browser.Events.onAnimationFrameDelta FrameTick
-            , Ports.streamIn InboundTelemetry
-            ]
-
-
-{-| Main update state machine.
+{-| Central Elm Architecture event loop update handler.
 -}
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
-        FrameTick deltaMs ->
-            stepSimulation deltaMs model
+        FrameTick elapsedMs ->
+            if model.isPaused then
+                ( model, Cmd.none )
+
+            else
+                stepSimulation elapsedMs model
 
         TogglePause ->
             ( { model | isPaused = not model.isPaused }, Cmd.none )
 
         SetSpeed spd ->
-            ( { model | simSpeed = clamp 0.5 10.0 spd }, Cmd.none )
+            ( { model | simSpeed = spd }, Cmd.none )
 
         SelectScenario scen ->
             let
-                def =
+                scenDef =
                     Scenarios.getScenarioDefinition scen
 
                 genCfg =
                     model.generatorState.config
 
                 updatedGenCfg =
-                    { genCfg | stElevationMv = def.stElevationMv }
+                    { genCfg | stElevationMv = scenDef.stElevationMv }
 
                 genSt =
                     model.generatorState
@@ -254,12 +335,14 @@ update msg model =
             )
 
         SelectBed bedNum ->
-            ( { model
-                | ward = Ward.selectBed bedNum model.ward
-                , isWardView = False
-              }
-            , Cmd.none
-            )
+            let
+                w =
+                    model.ward
+
+                updatedWard =
+                    { w | selectedBedNumber = bedNum }
+            in
+            ( { model | ward = updatedWard, isWardView = False }, Cmd.none )
 
         ToggleWardView ->
             ( { model | isWardView = not model.isWardView }, Cmd.none )
@@ -276,7 +359,11 @@ update msg model =
             )
 
         AcknowledgeAlarms ->
-            ( { model | alarmManager = AM.emptyAlarmManager }, Cmd.none )
+            let
+                mgr =
+                    model.alarmManager
+            in
+            ( { model | alarmManager = { mgr | activeAlarms = [] } }, Cmd.none )
 
         SelectPumpDrug drug ->
             let
@@ -325,7 +412,7 @@ update msg model =
                 pState =
                     model.pumpState
             in
-            ( { model | pumpState = { pState | currentRateMcgMin = max 0.0 rate } }, Cmd.none )
+            ( { model | pumpState = { pState | currentRateMcgMin = Basics.max 0.0 rate } }, Cmd.none )
 
         TogglePump ->
             let
@@ -371,9 +458,6 @@ update msg model =
 
         ResetNominal ->
             let
-                def =
-                    Scenarios.getScenarioDefinition BaselineNominal
-
                 genCfg =
                     model.generatorState.config
 
@@ -397,6 +481,89 @@ update msg model =
         InboundTelemetry _ ->
             ( model, Cmd.none )
 
+        PvModalMsg pvMsg ->
+            case pvMsg of
+                PvModal.ClosePvModal ->
+                    ( { model | activeModal = NoModal }, Cmd.none )
+
+                PvModal.AdjustContractility ees ->
+                    let
+                        m =
+                            model.pvModel
+                    in
+                    ( { model | pvModel = { m | eesMmHgPerMl = ees } }, Cmd.none )
+
+                PvModal.AdjustPreload edv ->
+                    let
+                        m =
+                            model.pvModel
+                    in
+                    ( { model | pvModel = { m | targetEdvMl = edv } }, Cmd.none )
+
+                PvModal.AdjustAfterload mapPress ->
+                    let
+                        m =
+                            model.pvModel
+                    in
+                    ( { model | pvModel = { m | meanArterialPressureMmHg = mapPress } }, Cmd.none )
+
+        VentViewMsg vMsg ->
+            case vMsg of
+                VentView.CloseVentilatorView ->
+                    ( { model | activeModal = NoModal }, Cmd.none )
+
+                VentView.SetVentMode mode ->
+                    let
+                        st =
+                            model.ventSettings
+                    in
+                    ( { model | ventSettings = { st | mode = mode } }, Cmd.none )
+
+                VentView.AdjustVentRate rate ->
+                    let
+                        st =
+                            model.ventSettings
+                    in
+                    ( { model | ventSettings = { st | respiratoryRateBpm = rate } }, Cmd.none )
+
+                VentView.AdjustVentPeep peep ->
+                    let
+                        st =
+                            model.ventSettings
+                    in
+                    ( { model | ventSettings = { st | peepCmH2o = peep } }, Cmd.none )
+
+                VentView.AdjustVentTidalVolume vt ->
+                    let
+                        st =
+                            model.ventSettings
+                    in
+                    ( { model | ventSettings = { st | tidalVolumeTargetMl = vt } }, Cmd.none )
+
+        TrendsViewMsg tMsg ->
+            case tMsg of
+                TrendsView.CloseTrendsView ->
+                    ( { model | activeModal = NoModal }, Cmd.none )
+
+                TrendsView.SelectInterval interval ->
+                    ( { model | trendInterval = interval }, Cmd.none )
+
+        SpectrumModalMsg sMsg ->
+            case sMsg of
+                SpectrumModal.CloseSpectrumModal ->
+                    ( { model | activeModal = NoModal }, Cmd.none )
+
+        EhrModalMsg eMsg ->
+            case eMsg of
+                EhrModal.CloseEhrModal ->
+                    ( { model | activeModal = NoModal }, Cmd.none )
+
+                EhrModal.SelectFormat fmt ->
+                    ( { model | ehrFormat = fmt }, Cmd.none )
+
+                EhrModal.CopyExportPayload payload ->
+                    ( model, Ports.exportEhr (Encode.string payload) )
+
 
 {-| Step physiological simulation and signal processing by deltaMs.
 Executes discrete 5 ms sub-steps (200 Hz DSP frequency) for fidelity.
@@ -405,13 +572,13 @@ stepSimulation : Float -> Model -> ( Model, Cmd Msg )
 stepSimulation elapsedMs model =
     let
         effectiveElapsedMs =
-            min 100.0 (elapsedMs * model.simSpeed)
+            Basics.min 100.0 (elapsedMs * model.simSpeed)
 
         subStepDtMs =
             5.0
 
         numSubSteps =
-            max 1 (round (effectiveElapsedMs / subStepDtMs))
+            Basics.max 1 (round (effectiveElapsedMs / subStepDtMs))
 
         scenDef =
             Scenarios.getScenarioDefinition model.activeScenario
@@ -435,6 +602,19 @@ stepSimulation elapsedMs model =
 
         nextPumpState =
             { pState | concentrations = updatedConcs }
+
+        -- Step mechanical ventilator
+        ( newVentScalars, nextVentSt ) =
+            Vent.stepVentilator model.ventSettings model.ventMechanics model.ventState
+
+        newPawHistory =
+            List.take 60 (newVentScalars.airwayPressureCmH2o :: model.pawHistory)
+
+        newFlowHistory =
+            List.take 60 (newVentScalars.flowLitersPerMin :: model.flowHistory)
+
+        newVolHistory =
+            List.take 60 (newVentScalars.deliveredVolumeMl :: model.volHistory)
 
         -- Execute sub-steps across DSP pipeline
         executeSubStep _ ( m, curTime ) =
@@ -482,79 +662,106 @@ stepSimulation elapsedMs model =
                 ( capnoFeat, nextCapnoSt ) =
                     Capno.processCapnoSample raw.capnoMmhg t m.capnoState
 
-                -- Update points buffer (retain rolling 4 seconds = 800 samples)
+                -- Respiration Impedance
+                ( respMetrics, nextRespSt ) =
+                    Resp.stepRespiration (500.0 + raw.capnoMmhg * 0.5) m.respirationState
+
+                -- Sweepbar buffer management (keep recent 750 points)
                 maxPts =
                     750
 
                 addPt val isPk buf =
                     { timestamp = t, value = val, isRPeak = isPk } :: List.take (maxPts - 1) buf
 
-                nextLeadIi =
+                newLeadIi =
                     addPt raw.leadII qrsDet.isPeak m.leadIiPoints
 
-                nextAbp =
+                newAbp =
                     addPt raw.abpMmhg False m.abpPoints
 
-                nextPpg =
+                newPpg =
                     addPt (raw.ppgIr * 40.0) False m.ppgPoints
 
-                nextCapno =
+                newCapno =
                     addPt raw.capnoMmhg False m.capnoPoints
 
-                nextCvp =
+                newCvp =
                     addPt raw.cvpMmhg False m.cvpPoints
 
-                -- Heartbeat visual animation pulse
-                ( nextBeating, nextBeatTimer ) =
+                -- Heartbeat blip timer
+                newBeating =
                     if qrsDet.isPeak then
-                        ( True, 120.0 )
+                        True
 
-                    else if m.heartBeatTimerMs > 0.0 then
-                        ( True, m.heartBeatTimerMs - subStepDtMs )
+                    else if m.heartBeatTimerMs > 120.0 then
+                        False
 
                     else
-                        ( False, 0.0 )
+                        m.isHeartBeating
 
-                nextM =
-                    { m
-                        | generatorState = nextGenSt
-                        , ptDetector = nextPtSt
-                        , arrhythmiaClassifier = nextArrCl
-                        , pulseContourState = nextContourSt
-                        , plethState = nextPlethSt
-                        , capnoState = nextCapnoSt
-                        , leadIiPoints = nextLeadIi
-                        , abpPoints = nextAbp
-                        , ppgPoints = nextPpg
-                        , capnoPoints = nextCapno
-                        , cvpPoints = nextCvp
-                        , isHeartBeating = nextBeating
-                        , heartBeatTimerMs = nextBeatTimer
-                    }
+                newTimer =
+                    if qrsDet.isPeak then
+                        0.0
+
+                    else
+                        m.heartBeatTimerMs + subStepDtMs
+
+                -- RR history for HRV
+                updatedRr =
+                    if qrsDet.isPeak then
+                        let
+                            rr =
+                                Maybe.withDefault (60000.0 / scenDef.heartRateBpm) qrsDet.rrIntervalMs
+                        in
+                        List.take 30 (rr :: m.rrHistoryMs)
+
+                    else
+                        m.rrHistoryMs
             in
-            ( nextM, t )
+            ( { m
+                | generatorState = nextGenSt
+                , ptDetector = nextPtSt
+                , arrhythmiaClassifier = nextArrCl
+                , pulseContourState = nextContourSt
+                , plethState = nextPlethSt
+                , capnoState = nextCapnoSt
+                , respirationState = nextRespSt
+                , leadIiPoints = newLeadIi
+                , abpPoints = newAbp
+                , ppgPoints = newPpg
+                , capnoPoints = newCapno
+                , cvpPoints = newCvp
+                , isHeartBeating = newBeating
+                , heartBeatTimerMs = newTimer
+                , rrHistoryMs = updatedRr
+              }
+            , t
+            )
 
         ( finalModel, finalTime ) =
             List.foldl executeSubStep ( model, model.currentTimeMs ) (List.range 1 numSubSteps)
 
-        -- Evaluate alarms with multi-sensor fusion
+        -- Evaluate Alarm Conditions
+        rhythm =
+            finalModel.arrhythmiaClassifier.currentRhythm
+
         mapVal =
             scenDef.diastolicMmhg + ((scenDef.systolicMmhg - scenDef.diastolicMmhg) / 3.0)
 
         updatedAlarmMgr =
             AM.evaluateVitals
-                finalModel.arrhythmiaClassifier.currentRhythm
+                rhythm
                 scenDef.heartRateBpm
                 scenDef.systolicMmhg
                 scenDef.diastolicMmhg
-                mapVal
                 scenDef.spo2Percent
                 scenDef.etco2Mmhg
-                True
+                scenDef.temperatureC
+                (finalModel.activeScenario == AcuteAnteriorStemi)
                 finalTime
-                (AM.tickSilenceTimer (effectiveElapsedMs / 1000.0) finalModel.alarmManager)
+                finalModel.alarmManager
 
-        -- Update Hemodynamics
+        -- Hemodynamics calculation
         updatedHemo =
             Hemo.calculateHemodynamics
                 scenDef.heartRateBpm
@@ -589,6 +796,37 @@ stepSimulation elapsedMs model =
                 hasWarning
                 rhythmStr
                 finalModel.ward
+
+        -- Retrospective trend logging every 2000 ms (2 seconds)
+        shouldRecordTrend =
+            (finalTime - finalModel.lastTrendRecordTimeMs) >= 2000.0
+
+        updatedTrends =
+            if shouldRecordTrend then
+                let
+                    newRec =
+                        { timestampSec = finalTime / 1000.0
+                        , heartRateBpm = scenDef.heartRateBpm
+                        , abpSystolicMmHg = scenDef.systolicMmhg
+                        , abpDiastolicMmHg = scenDef.diastolicMmhg
+                        , abpMeanMmHg = mapVal
+                        , spO2Percent = scenDef.spo2Percent
+                        , etco2MmHg = scenDef.etco2Mmhg
+                        , respiratoryRateBpm = 14.0
+                        , temperatureCelsius = scenDef.temperatureC
+                        }
+                in
+                List.take 50 (newRec :: finalModel.trendRecords)
+
+            else
+                finalModel.trendRecords
+
+        nextTrendTime =
+            if shouldRecordTrend then
+                finalTime
+
+            else
+                finalModel.lastTrendRecordTimeMs
     in
     ( { finalModel
         | currentTimeMs = finalTime
@@ -596,6 +834,13 @@ stepSimulation elapsedMs model =
         , hemoProfile = updatedHemo
         , pumpState = nextPumpState
         , ward = updatedWard
+        , ventScalars = newVentScalars
+        , ventState = nextVentSt
+        , pawHistory = newPawHistory
+        , flowHistory = newFlowHistory
+        , volHistory = newVolHistory
+        , trendRecords = updatedTrends
+        , lastTrendRecordTimeMs = nextTrendTime
       }
     , Cmd.none
     )
@@ -605,6 +850,25 @@ stepSimulation elapsedMs model =
 -}
 view : Model -> Html Msg
 view model =
+    let
+        toolbarActions =
+            { togglePause = TogglePause
+            , setSpeed = SetSpeed
+            , selectScenario = SelectScenario
+            , open12Lead = OpenModal Modal12Lead
+            , openHemo = OpenModal ModalHemodynamics
+            , openPump = OpenModal ModalInfusionPump
+            , openPvLoop = OpenModal ModalPvLoop
+            , openVentilator = OpenModal ModalVentilator
+            , openTrends = OpenModal ModalTrends
+            , openSpectrum = OpenModal ModalSpectrum
+            , openEhr = OpenModal ModalEhrExport
+            , toggleWard = ToggleWardView
+            , triggerVfib = TriggerEmergencyVfib
+            , triggerAsystole = TriggerEmergencyAsystole
+            , resetNominal = ResetNominal
+            }
+    in
     div
         [ style "background" Theme.backgroundColor
         , style "color" Theme.textPrimaryColor
@@ -616,7 +880,7 @@ view model =
         [ -- 1. Top Alarm Presentation Banner
           AlarmBanner.renderAlarmBanner model.alarmManager SilenceAlarms AcknowledgeAlarms
 
-        -- 2. Patient Demographics & Bed Header Ticker
+        -- 2. Patient Demographics and Bed Header Ticker
         , renderPatientHeader model
 
         -- 3. Main Workspace: Bedside Sweepbar Oscilloscope OR 8-Bed Ward Overview
@@ -632,22 +896,13 @@ view model =
                 renderBedsideWorkspace model
             ]
 
-        -- 4. Bottom Controls & Simulation Toolbar
+        -- 4. Bottom Controls and Simulation Toolbar
         , Controls.renderControlToolbar
             model.isPaused
             model.simSpeed
             model.activeScenario
             model.isWardView
-            TogglePause
-            SetSpeed
-            SelectScenario
-            (OpenModal Modal12Lead)
-            (OpenModal ModalHemodynamics)
-            (OpenModal ModalInfusionPump)
-            ToggleWardView
-            TriggerEmergencyVfib
-            TriggerEmergencyAsystole
-            ResetNominal
+            toolbarActions
 
         -- 5. Modal Dialogs Overlay
         , renderActiveModal model
@@ -721,39 +976,40 @@ renderPatientHeader model =
                 , style "font-size" "12px"
                 , style "font-family" "monospace"
                 ]
-                [ text ("| " ++ p.primaryDiagnosis) ]
+                [ text ("Diagnosis: " ++ p.primaryDiagnosis) ]
             ]
         , div
             [ style "display" "flex"
-            , style "align-items" "center"
             , style "gap" "16px"
+            , style "font-family" "monospace"
+            , style "font-size" "13px"
             ]
-            [ span
-                [ style "color" Theme.ecgColor
-                , style "font-size" "12px"
-                , style "font-family" "monospace"
+            [ div []
+                [ span [ style "color" Theme.textMutedColor ] [ text "NEWS2: " ]
+                , span [ style "color" Theme.warningColor, style "font-weight" "bold" ] [ text "2 (Low Risk)" ]
                 ]
-                [ text "DSP SWEEP: 25 mm/s | 200 Hz" ]
-            , span
-                [ style "color" Theme.textMutedColor
-                , style "font-size" "12px"
-                , style "font-family" "monospace"
+            , div []
+                [ span [ style "color" Theme.textMutedColor ] [ text "SOFA: " ]
+                , span [ style "color" Theme.textPrimaryColor, style "font-weight" "bold" ] [ text "1" ]
                 ]
-                [ text "PURE ELM ENGINE" ]
+            , div []
+                [ span [ style "color" Theme.textMutedColor ] [ text "SIM TIME: " ]
+                , span [ style "color" Theme.ecgColor, style "font-weight" "bold" ] [ text (formatSimTime model.currentTimeMs) ]
+                ]
             ]
         ]
 
 
-{-| Bedside split workspace: Oscilloscope Waveforms on Left, Parameter Blocks on Right.
+{-| Bedside sweepbar oscilloscope workspace with numeric vitals callout column.
 -}
 renderBedsideWorkspace : Model -> Html Msg
 renderBedsideWorkspace model =
     let
-        scenDef =
-            Scenarios.getScenarioDefinition model.activeScenario
-
         sweepPos =
             Sweepbar.normalizeX model.currentTimeMs 800.0
+
+        scenDef =
+            Scenarios.getScenarioDefinition model.activeScenario
 
         rhythmStr =
             Arr.rhythmToString model.arrhythmiaClassifier.currentRhythm
@@ -886,6 +1142,137 @@ renderActiveModal model =
                 TogglePump
                 DeliverPumpBolus
                 CloseModals
+
+        ModalPvLoop ->
+            Html.map PvModalMsg (PvModal.viewPvModal model.pvModel)
+
+        ModalVentilator ->
+            Html.map VentViewMsg
+                (VentView.viewVentilatorScreen
+                    model.ventSettings
+                    model.ventMechanics
+                    model.ventScalars
+                    model.pawHistory
+                    model.flowHistory
+                    model.volHistory
+                )
+
+        ModalTrends ->
+            Html.map TrendsViewMsg
+                (TrendsView.viewTrendsScreen
+                    model.trendInterval
+                    model.trendRecords
+                )
+
+        ModalSpectrum ->
+            Html.map SpectrumModalMsg
+                (SpectrumModal.viewSpectrumModal
+                    model.hrvMetrics
+                    model.psdPoints
+                )
+
+        ModalEhrExport ->
+            let
+                activeBed =
+                    Ward.getBed model.ward.selectedBedNumber model.ward
+                        |> Maybe.withDefault
+                            { bedNumber = 1
+                            , patient = defaultPatient
+                            , scenario = BaselineNominal
+                            , heartRateBpm = 75.0
+                            , systolicMmhg = 120.0
+                            , diastolicMmhg = 80.0
+                            , meanMmhg = 93.3
+                            , spo2Percent = 98.0
+                            , etco2Mmhg = 38.0
+                            , cvpMmhg = 6.0
+                            , hasActiveCrisis = False
+                            , hasActiveWarning = False
+                            , primaryRhythmString = "Normal Sinus Rhythm"
+                            }
+            in
+            Html.map EhrModalMsg
+                (EhrModal.viewEhrModal
+                    model.ehrFormat
+                    activeBed.patient
+                    model.currentTimeMs
+                )
+
+
+formatSimTime : Float -> String
+formatSimTime ms =
+    let
+        totalSec =
+            round (ms / 1000.0)
+
+        m =
+            modBy 60 (totalSec // 60)
+
+        s =
+            modBy 60 totalSec
+
+        pad n =
+            if n < 10 then
+                "0" ++ String.fromInt n
+
+            else
+                String.fromInt n
+    in
+    pad m ++ ":" ++ pad s
+
+
+{-| Application subscriptions: 60 FPS animation frame tick and keyboard shortcuts.
+-}
+subscriptions : Model -> Sub Msg
+subscriptions _ =
+    Sub.batch
+        [ Browser.Events.onAnimationFrameDelta FrameTick
+        , Browser.Events.onKeyDown (Decode.map handleKeyDown (Decode.field "key" Decode.string))
+        , Ports.streamIn InboundTelemetry
+        ]
+
+
+handleKeyDown : String -> Msg
+handleKeyDown key =
+    case key of
+        " " ->
+            TogglePause
+
+        "Escape" ->
+            CloseModals
+
+        "1" ->
+            OpenModal Modal12Lead
+
+        "2" ->
+            OpenModal ModalHemodynamics
+
+        "3" ->
+            OpenModal ModalInfusionPump
+
+        "4" ->
+            OpenModal ModalPvLoop
+
+        "5" ->
+            OpenModal ModalVentilator
+
+        "6" ->
+            OpenModal ModalTrends
+
+        "7" ->
+            OpenModal ModalSpectrum
+
+        "8" ->
+            OpenModal ModalEhrExport
+
+        "w" ->
+            ToggleWardView
+
+        "W" ->
+            ToggleWardView
+
+        _ ->
+            FrameTick 0.0
 
 
 main : Program () Model Msg
