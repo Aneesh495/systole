@@ -26,6 +26,17 @@ typedef struct {
 } systole_biquad_state_t;
 
 /*
+ * Multi-stage biquad cascade.
+ */
+#define SYSTOLE_MAX_CASCADE_STAGES 8
+
+typedef struct {
+    int num_stages;
+    systole_biquad_coeffs_t coeffs[SYSTOLE_MAX_CASCADE_STAGES];
+    systole_biquad_state_t states[SYSTOLE_MAX_CASCADE_STAGES];
+} systole_cascade_t;
+
+/*
  * Pan-Tompkins real-time QRS detector state.
  */
 #define SYSTOLE_DIFF_BUF_SIZE 5
@@ -76,6 +87,14 @@ typedef struct {
 void systole_biquad_init(systole_biquad_state_t *st);
 double systole_biquad_step(const systole_biquad_coeffs_t *c, double x, systole_biquad_state_t *st);
 systole_biquad_coeffs_t systole_butterworth_bandpass(double fs, double f0, double q);
+systole_biquad_coeffs_t systole_butterworth_lowpass(double fs, double fc);
+systole_biquad_coeffs_t systole_butterworth_highpass(double fs, double fc);
+
+void systole_cascade_init(systole_cascade_t *casc, int num_stages, const systole_biquad_coeffs_t *stages);
+double systole_cascade_step(systole_cascade_t *casc, double x);
+
+/* Discrete Wavelet Transform (Haar) API */
+void systole_dwt_haar_step(const double *in, int len, double *approx_out, double *detail_out);
 
 /* Pan-Tompkins Detector APIs */
 void systole_pt_init(systole_pan_tompkins_t *pt, double fs);
@@ -85,6 +104,15 @@ bool systole_pt_process(systole_pan_tompkins_t *pt, double raw_sample, double *o
 double systole_estimate_stroke_volume(double sbp, double dbp, double systolic_area);
 double systole_calculate_bsa_dubois(double weight_kg, double height_cm);
 double systole_calculate_svr(double map, double cvp, double co);
+
+/* Pressure-Volume Loop APIs */
+double systole_pv_espvr(double ees, double v0, double volume);
+double systole_pv_edpvr(double beta, double alpha, double volume);
+double systole_pv_arterial_elastance(double esp, double sv);
+double systole_pv_vac(double ea, double ees);
+
+/* Mechanical Ventilator Equation of Motion API */
+double systole_vent_airway_pressure(double peep, double flow_lps, double raw, double vol_ml, double cstat);
 
 /* Pharmacokinetics APIs */
 void systole_pk_init(systole_pk_state_t *pk, double v1, double v2, double v3, double k10, double k12, double k21, double k13, double k31, double ke0);
