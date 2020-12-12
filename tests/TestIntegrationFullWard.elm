@@ -35,14 +35,14 @@ suite =
                     updatedWard =
                         Ward.updateBedVitals
                             3
-                            128.0 -- HR
-                            84.0 -- SBP
-                            42.0 -- DBP
-                            92.0 -- SpO2
-                            31.0 -- EtCO2
-                            4.0 -- CVP
-                            True -- Crisis
-                            False -- Warning
+                            128.0
+                            84.0
+                            42.0
+                            92.0
+                            31.0
+                            4.0
+                            True
+                            False
                             "Sinus Tachycardia"
                             initialWard
 
