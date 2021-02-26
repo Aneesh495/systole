@@ -1,10 +1,10 @@
-.PHONY: all build test test-elm test-c test-python format clean verify-dashes
+.PHONY: all build test test-elm test-c test-python bench verify-dashes clean serve verify-all
 
-all: build test
+all: verify-all build
 
 build:
 	@mkdir -p web
-	elm make src/Main.elm --optimize --output=web/app.js
+	elm make src/Main.elm --optimize --output=web/elm.js
 
 test: test-elm test-c test-python verify-dashes
 
@@ -21,11 +21,21 @@ test-python:
 		python3 -m unittest discover -s tools -p "test_*.py" -v; \
 	fi
 
-format:
-	elm-format src/ tests/ --yes
+bench:
+	@echo "Running C fastpath test suite..."
+	$(MAKE) -C c_fastpath test
+	@echo "\nRunning Python DSP throughput benchmark..."
+	python3 tools/benchmark_dsp.py 1000000
 
 verify-dashes:
 	bash scripts/verify_no_em_dashes.sh
 
+verify-all: test bench
+	@echo "\nALL SYSTOLE CONTINUOUS INTEGRATION VERIFICATIONS PASSED WITH ZERO ERRORS."
+
+serve: build
+	@echo "Serving Systole ICU Clinical Telemetry Workstation at http://localhost:8080"
+	python3 -m http.server 8080 --directory web
+
 clean:
-	rm -rf elm-stuff web/app.js c_fastpath/*.o c_fastpath/c_test_runner
+	rm -rf elm-stuff web/elm.js c_fastpath/*.o c_fastpath/c_test_runner
